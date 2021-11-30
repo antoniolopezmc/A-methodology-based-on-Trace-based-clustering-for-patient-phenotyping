@@ -1,0 +1,88 @@
+/*
+**************************************************************************
+* Author: Antonio López Martínez-Carrasco <antoniolopezmc1995@gmail.com> *
+**************************************************************************
+*/
+
+/*
+***********************
+* NECESSARY FUNCTIONS *
+***********************
+*/
+
+-- Service where the patient resided when a culture was done.
+-- If the patient did not reside in any service when a culture was done, return null.
+CREATE OR REPLACE FUNCTION getServiceWhenCulture (patient_id INT, admission_id INT, culture_date TIMESTAMP) RETURNS VARCHAR AS $$
+DECLARE
+    rec RECORD;
+BEGIN
+    FOR rec IN (SELECT transfertime, prev_service, curr_service FROM SERVICES WHERE subject_id = patient_id AND hadm_id = admission_id ORDER BY transfertime DESC) LOOP
+        IF culture_date > rec.transfertime THEN
+            RETURN rec.curr_service;
+        END IF;
+    END LOOP;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Care unit of ICU (ICU unit) where the patient resided when a culture was done.
+-- If the patient did not reside in any ICU unit when a culture was done, return null.
+CREATE OR REPLACE FUNCTION getICUWhenCulture (patient_id INT, admission_id INT, culture_date TIMESTAMP) RETURNS VARCHAR AS $$
+DECLARE
+    rec RECORD;
+BEGIN
+    FOR rec IN (SELECT prev_careunit, curr_careunit, intime FROM TRANSFERS WHERE subject_id = patient_id AND hadm_id = admission_id ORDER BY intime DESC) LOOP
+        IF culture_date > rec.intime THEN
+            RETURN rec.curr_careunit;
+        END IF;
+    END LOOP;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+/*
+*********************************
+* FIRST SUBQUERY FOR POSTGRESQL *
+*********************************
+*/
+
+COPY (SELECT 
+    p.subject_id as patient_id,
+    p.gender as patient_gender,
+    p.dob as patient_date_of_birth,
+    a.hadm_id as admission_id,
+    a.admittime as admission_date,
+    CASE
+        WHEN EXISTS (SELECT * FROM ADMISSIONS as a2 WHERE a.subject_id = a2.subject_id AND a.hadm_id != a2.hadm_id AND a.admittime > a2.admittime LIMIT 1) THEN (SELECT a2.admittime FROM ADMISSIONS as a2 WHERE a.subject_id = a2.subject_id AND a.hadm_id != a2.hadm_id AND a.admittime > a2.admittime ORDER BY a2.admittime DESC LIMIT 1)
+        ELSE NULL
+    END admission_date_of_last_admission,
+    CASE
+        WHEN a.hospital_expire_flag = 0 THEN a.dischtime
+        WHEN a.hospital_expire_flag = 1 THEN a.deathtime
+    END as discharge_or_death_time,
+    a.hospital_expire_flag as exitus,
+    a.admission_type as admission_type,
+    a.admission_location as admission_location,
+    a.discharge_location as discharge_location,
+    CASE
+        WHEN EXISTS (SELECT * FROM ICUSTAYS as i WHERE i.subject_id = p.subject_id AND i.hadm_id = a.hadm_id LIMIT 1) THEN (SELECT intime FROM ICUSTAYS as i WHERE i.subject_id = p.subject_id AND i.hadm_id = a.hadm_id ORDER BY intime LIMIT 1)
+        ELSE NULL
+    END as admission_date_of_first_icu,
+    COALESCE(m.charttime, m.chartdate) as culture_date,
+    m.spec_itemid as culture_specimen_id,
+    m.spec_type_desc as culture_specimen_type_description,
+    m.org_itemid as culture_microorganism_id,
+    m.org_name as culture_microorganism_name,
+    m.isolate_num as isolate_number,
+    m.ab_itemid as culture_antibiotic_id,
+    m.ab_name as culture_antibiotic_name,
+    m.dilution_text as culture_mic,
+    m.dilution_comparison as culture_mic_comparison,
+    m.dilution_value as culture_mic_value,
+    m.interpretation as culture_susceptibility,
+    getServiceWhenCulture(p.subject_id, a.hadm_id, COALESCE(m.charttime, m.chartdate)) as service_when_culture,
+    getICUWhenCulture(p.subject_id, a.hadm_id, COALESCE(m.charttime, m.chartdate)) as icu_when_culture
+FROM (PATIENTS as p RIGHT OUTER JOIN ADMISSIONS as a ON p.subject_id = a.subject_id) LEFT OUTER JOIN MICROBIOLOGYEVENTS as m ON a.hadm_id = m.hadm_id AND p.subject_id = m.subject_id
+WHERE (m.org_name like 'ENTEROCOCCUS FAECIUM' OR m.org_name like 'POSITIVE FOR METHICILLIN RESISTANT STAPH AUREUS') AND m.ab_name like 'VANCOMYCIN') 
+TO 'C:\Users\Public\Documents\mimic-iii-initial-db.csv'
+WITH csv header;

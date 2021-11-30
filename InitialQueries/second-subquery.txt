@@ -1,0 +1,28 @@
+/*
+**************************************************************************
+* Author: Antonio López Martínez-Carrasco <antoniolopezmc1995@gmail.com> *
+**************************************************************************
+*/
+
+/*
+**********************************
+* SECOND SUBQUERY FOR POSTGRESQL *
+**********************************
+*/
+
+COPY (SELECT 
+    i.subject_id as patient_id, 
+    i.hadm_id as admission_id,
+    i.starttime,
+    i.endtime,
+    i.itemid as item_id
+FROM INPUTEVENTS_MV as i
+WHERE i.itemid = 225798 AND i.subject_id IN 
+(
+    SELECT distinct p.subject_id
+    FROM (PATIENTS as p RIGHT OUTER JOIN ADMISSIONS as a ON p.subject_id = a.subject_id) LEFT OUTER JOIN MICROBIOLOGYEVENTS as m ON a.hadm_id = m.hadm_id AND p.subject_id = m.subject_id
+    WHERE (m.org_name like 'ENTEROCOCCUS FAECIUM' OR m.org_name like 'POSITIVE FOR METHICILLIN RESISTANT STAPH AUREUS') AND m.ab_name like 'VANCOMYCIN'
+)
+ORDER BY starttime)
+TO 'C:\Users\Public\Documents\mimic-iii-inputevents_mv-aux.csv'
+WITH csv header;
