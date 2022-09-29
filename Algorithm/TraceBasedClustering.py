@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 # Author:
-#    Antonio López Martínez-Carrasco <anlopezmc@gmail.com>
+#    Antonio López Martínez-Carrasco <antoniolopezmc1995@gmail.com>
 
 """This file contains the implementation of the algorithm of Trace-Based Clustering.
 """
